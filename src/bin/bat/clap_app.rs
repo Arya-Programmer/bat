@@ -489,6 +489,17 @@ pub fn build_app(interactive_output: bool) -> Command {
                 .hide_short_help(true)
         )
         .arg(
+            Arg::new("markdown-tables")
+                .long("markdown-tables")
+                .overrides_with("markdown-tables")
+                .action(ArgAction::SetTrue)
+                .help("Lay out Markdown tables.")
+                .long_help("Lay out the tables in a Markdown file so that their columns \
+                line up, and draw a border around them. Cells keep the alignment requested by \
+                the delimiter row. This rewrites the table before it is highlighted, so the \
+                output no longer matches the input byte for byte.")
+        )
+        .arg(
             Arg::new("strip-ansi")
                 .long("strip-ansi")
                 .overrides_with("strip-ansi")

@@ -249,6 +249,16 @@ impl<'a> PrettyPrinter<'a> {
         self
     }
 
+    /// Whether to lay out Markdown tables with aligned columns and a border
+    /// (default: false)
+    ///
+    /// This rewrites the table before it is highlighted, so the output no longer
+    /// matches the input byte for byte.
+    pub fn markdown_tables(&mut self, yes: bool) -> &mut Self {
+        self.config.markdown_tables = yes;
+        self
+    }
+
     /// Specify the maximum number of consecutive empty lines to print.
     pub fn squeeze_empty_lines(&mut self, maximum: Option<usize>) -> &mut Self {
         self.config.squeeze_lines = maximum;

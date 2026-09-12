@@ -355,7 +355,10 @@ impl<'a> InteractivePrinter<'a> {
             strip_overstrike,
             // Laying out a table means holding its lines back, which is at odds
             // with streaming input line by line.
-            markdown_tables: (is_markdown && !config.show_nonprintable && !config.unbuffered)
+            markdown_tables: (config.markdown_tables
+                && is_markdown
+                && !config.show_nonprintable
+                && !config.unbuffered)
                 .then(TableRenderer::default),
         })
     }

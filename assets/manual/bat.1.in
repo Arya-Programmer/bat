@@ -219,6 +219,12 @@ Squeeze consecutive empty lines into a single empty line.
 .IP
 Set the maximum number of consecutive empty lines to be printed.
 .HP
+\fB\-\-markdown\-tables\fR
+.IP
+Lay out the tables in a Markdown file so that their columns line up, and draw a border around
+them. Cells keep the alignment requested by the delimiter row. This rewrites the table before
+it is highlighted, so the output no longer matches the input byte for byte.
+.HP
 \fB\-\-strip\-ansi\fR <when>
 .IP
 Specify when to strip ANSI escape sequences from the input. The automatic mode will remove

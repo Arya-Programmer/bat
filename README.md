@@ -541,6 +541,25 @@ The available individual components are:
 > Or, if you want to override the styles completely, you use `--style=numbers` to
 > only show the line numbers.
 
+### Markdown tables
+
+Markdown tables are written with the pipes wherever they happen to fall, which
+makes them hard to read in the source. Pass `--markdown-tables` to lay them out
+with aligned columns and a border:
+
+```bash
+bat --markdown-tables README.md
+```
+
+Cells keep the alignment requested by the delimiter row, so `:---`, `:---:` and
+`---:` still mean left, center and right. Tables inside code blocks are left
+alone.
+
+This rewrites the table before it is highlighted, so the output no longer matches
+the input byte for byte. The option is off by default for that reason, and it has
+no effect under `--unbuffered`, which cannot hold lines back long enough to
+measure a table.
+
 ### Decorations
 
 By default, `bat` only shows decorations (such as line numbers, file headers, grid borders, etc.) when outputting to an interactive terminal. You can control this behavior with the `--decorations` option. Use `--decorations=always` to show decorations even when piping output to another command, or `--decorations=never` to disable them entirely. Possible values are `auto` (default), `never`, and `always`.

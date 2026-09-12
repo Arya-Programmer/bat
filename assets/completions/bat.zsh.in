@@ -53,6 +53,7 @@ _{{PROJECT_EXECUTABLE}}_main() {
         '(: --list-themes --list-languages -L)'--list-themes'[show all supported highlighting themes]'
         --squeeze-blank'[squeeze consecutive empty lines into a single empty line]'
         --squeeze-limit='[set the maximum number of consecutive empty lines]:limit:'
+        --markdown-tables'[lay out markdown tables with aligned columns and a border]'
         --strip-ansi='[specify when to strip ANSI escape sequences]:when:(auto never always)'
         --sanitize='[specify when to sanitize untrusted input for safe display]:when:(auto never always)'
         --style='[comma-separated list of style elements to display]: : _values "style [default]"

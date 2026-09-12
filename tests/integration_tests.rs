@@ -2671,8 +2671,19 @@ fn file_with_invalid_utf8_filename() {
 }
 
 #[test]
+fn markdown_tables_are_left_alone_by_default() {
+    bat()
+        .arg("--style=plain")
+        .arg("markdown-table.md")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("| Fruit | Price | Stock |"));
+}
+
+#[test]
 fn markdown_tables_are_aligned() {
     let output = bat()
+        .arg("--markdown-tables")
         .arg("--color=always")
         .arg("--style=numbers")
         .arg("--terminal-width=80")
@@ -2698,6 +2709,18 @@ fn markdown_tables_are_aligned() {
             "   8 After the table.\n",
         )
     );
+}
+
+#[test]
+fn markdown_tables_are_left_alone_when_unbuffered() {
+    bat()
+        .arg("--markdown-tables")
+        .arg("--unbuffered")
+        .arg("--style=plain")
+        .arg("markdown-table.md")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("| Fruit | Price | Stock |"));
 }
 
 #[test]

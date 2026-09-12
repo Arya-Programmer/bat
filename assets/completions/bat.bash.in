@@ -225,6 +225,7 @@ _bat() {
 			--list-themes
 			--squeeze-blank
 			--squeeze-limit
+			--markdown-tables
 			--sanitize
 			--strip-ansi
 			--style

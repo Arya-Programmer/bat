@@ -120,6 +120,9 @@ pub struct Config<'a> {
     /// Whether or not to use unbuffered input reading for streaming use cases
     pub unbuffered: bool,
 
+    /// Whether or not to lay out Markdown tables with aligned columns and a border
+    pub markdown_tables: bool,
+
     /// Only number non-blank lines (like `cat -b`). Has no effect if `style_components` doesn't
     /// include `LineNumbers`.
     pub number_nonblank: bool,
