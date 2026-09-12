@@ -738,7 +738,7 @@ impl Printer for InteractivePrinter<'_> {
 }
 
 impl InteractivePrinter<'_> {
-    /// Prints the lines of a table that is still being buffered, as-is.
+    /// Prints everything that is still buffered, ending any open table.
     fn flush_markdown_tables(&mut self, handle: &mut OutputHandle) -> Result<()> {
         match self.markdown_tables {
             Some(ref mut tables) => {
