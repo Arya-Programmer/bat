@@ -9,7 +9,7 @@
 
 ## Features
 
-- Add `--markdown-tables` to lay out Markdown tables with aligned columns and a border, see #PR_NUMBER (@Arya-Programmer)
+- Add `--markdown-tables` to lay out Markdown tables with aligned columns and a border. Closes #4007, see #4008 (@Arya-Programmer)
 - Add `-b` / `--number-nonblank` flag to only number non-blank lines, for `cat -b` compatibility. Closes #3856, see #3857 (@MeGaurav4)
 - Add a `--sanitize=<auto|always|never>` flag for safe display of untrusted input. It implies `--strip-ansi` at the same value and additionally substitutes terminal-active control bytes (cursor moves, charset switches, beep, etc.) and Unicode bidi / zero-width formatting characters with the Unicode replacement character (U+FFFD). Mitigates Trojan-Source-style spoofing (CVE-2021-42574). See #3729 (@curious-rabbit)
 - Map justfile, Justfile, .justfile, and *.justfile to Makefile syntax highlighting, see #3623 (@zachvalenta)
@@ -92,7 +92,7 @@
 
 ## `bat` as a library
 
-- Add `PrettyPrinter::markdown_tables` to lay out Markdown tables, see #PR_NUMBER (@Arya-Programmer)
+- Add `PrettyPrinter::markdown_tables` to lay out Markdown tables, see #4008 (@Arya-Programmer)
 
 # v0.26.1
 
