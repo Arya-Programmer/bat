@@ -2669,6 +2669,55 @@ fn file_with_invalid_utf8_filename() {
         .stdout("dummy content\n");
 }
 
+/// Removes the ANSI escape sequences that `--color=always` adds, so that tests
+/// can assert on the text that ends up on screen.
+fn strip_ansi_escapes(input: &str) -> String {
+    let mut output = String::with_capacity(input.len());
+    let mut chars = input.chars();
+    while let Some(c) = chars.next() {
+        if c != '\x1b' {
+            output.push(c);
+            continue;
+        }
+        if chars.next() == Some('[') {
+            for c in chars.by_ref() {
+                if c.is_ascii_alphabetic() {
+                    break;
+                }
+            }
+        }
+    }
+    output
+}
+
+#[test]
+fn markdown_tables_are_aligned() {
+    let output = bat()
+        .arg("--color=always")
+        .arg("--style=numbers")
+        .arg("--terminal-width=80")
+        .arg("markdown-table.md")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    assert_eq!(
+        strip_ansi_escapes(from_utf8(&output).expect("valid utf8")),
+        concat!(
+            "   1 Before the table.\n",
+            "   2 \n",
+            "   3 │ Fruit   │ Price │ Stock │\n",
+            "   4 ├─────────┼───────┼───────┤\n",
+            "   5 │ Apples  │  1.20 │  yes  │\n",
+            "   6 │ Bananas │ 12.00 │  no   │\n",
+            "   7 \n",
+            "   8 After the table.\n",
+        )
+    );
+}
+
 #[test]
 fn do_not_panic_regression_tests() {
     for filename in &[
