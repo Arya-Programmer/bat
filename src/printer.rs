@@ -28,6 +28,7 @@ use crate::diff::LineChanges;
 use crate::error::*;
 use crate::input::OpenedInput;
 use crate::line_range::{MaxBufferedLineNumber, RangeCheckResult};
+use crate::markdown_table::{PendingLine, TableRenderer};
 use crate::output::OutputHandle;
 use crate::preprocessor::{
     expand_tabs, replace_nonprintable, sanitize, sanitize_for_terminal, strip_ansi,
@@ -213,6 +214,8 @@ pub(crate) struct InteractivePrinter<'a> {
     strip_ansi: bool,
     sanitize: bool,
     strip_overstrike: bool,
+    /// Buffers Markdown tables so that their columns can be aligned.
+    markdown_tables: Option<TableRenderer>,
 }
 
 impl<'a> InteractivePrinter<'a> {
@@ -279,40 +282,44 @@ impl<'a> InteractivePrinter<'a> {
                 || config.strip_ansi == StripAnsiMode::Auto
                 || config.sanitize == StripAnsiMode::Auto);
 
-        let (is_plain_text, strip_overstrike, highlighter_from_set) = if needs_to_match_syntax {
-            // Determine the type of syntax for highlighting
-            const PLAIN_TEXT_SYNTAX: &str = "Plain Text";
-            const MANPAGE_SYNTAX: &str = "Manpage";
-            const COMMAND_HELP_SYNTAX: &str = "Command Help";
-            match assets.get_syntax(
-                config.language,
-                config.fallback_syntax,
-                input,
-                &config.syntax_mapping,
-            ) {
-                Ok(syntax_in_set) => (
-                    syntax_in_set.syntax.name == PLAIN_TEXT_SYNTAX,
-                    syntax_in_set.syntax.name == MANPAGE_SYNTAX
-                        || syntax_in_set.syntax.name == COMMAND_HELP_SYNTAX,
-                    Some(HighlighterFromSet::new(syntax_in_set, theme)),
-                ),
-
-                Err(Error::UndetectedSyntax(_)) => (
-                    true,
-                    false,
-                    Some(
-                        assets
-                            .find_syntax_by_name(PLAIN_TEXT_SYNTAX)?
-                            .map(|s| HighlighterFromSet::new(s, theme))
-                            .expect("A plain text syntax is available"),
+        let (is_plain_text, strip_overstrike, is_markdown, highlighter_from_set) =
+            if needs_to_match_syntax {
+                // Determine the type of syntax for highlighting
+                const PLAIN_TEXT_SYNTAX: &str = "Plain Text";
+                const MANPAGE_SYNTAX: &str = "Manpage";
+                const COMMAND_HELP_SYNTAX: &str = "Command Help";
+                const MARKDOWN_SYNTAXES: [&str; 2] = ["Markdown", "MultiMarkdown"];
+                match assets.get_syntax(
+                    config.language,
+                    config.fallback_syntax,
+                    input,
+                    &config.syntax_mapping,
+                ) {
+                    Ok(syntax_in_set) => (
+                        syntax_in_set.syntax.name == PLAIN_TEXT_SYNTAX,
+                        syntax_in_set.syntax.name == MANPAGE_SYNTAX
+                            || syntax_in_set.syntax.name == COMMAND_HELP_SYNTAX,
+                        MARKDOWN_SYNTAXES.contains(&syntax_in_set.syntax.name.as_str()),
+                        Some(HighlighterFromSet::new(syntax_in_set, theme)),
                     ),
-                ),
 
-                Err(e) => return Err(e),
-            }
-        } else {
-            (false, false, None)
-        };
+                    Err(Error::UndetectedSyntax(_)) => (
+                        true,
+                        false,
+                        false,
+                        Some(
+                            assets
+                                .find_syntax_by_name(PLAIN_TEXT_SYNTAX)?
+                                .map(|s| HighlighterFromSet::new(s, theme))
+                                .expect("A plain text syntax is available"),
+                        ),
+                    ),
+
+                    Err(e) => return Err(e),
+                }
+            } else {
+                (false, false, false, None)
+            };
 
         // Determine when to strip ANSI sequences
         let strip_ansi = match config.strip_ansi {
@@ -346,6 +353,8 @@ impl<'a> InteractivePrinter<'a> {
             strip_ansi,
             sanitize,
             strip_overstrike,
+            markdown_tables: (is_markdown && !config.show_nonprintable)
+                .then(TableRenderer::default),
         })
     }
 
@@ -593,6 +602,8 @@ impl Printer for InteractivePrinter<'_> {
     }
 
     fn print_footer(&mut self, handle: &mut OutputHandle, _input: &OpenedInput) -> Result<()> {
+        self.flush_markdown_tables(handle)?;
+
         // If input is empty and quiet_empty is enabled, skip footer
         if self.content_type.is_none() && self.config.quiet_empty {
             return Ok(());
@@ -610,6 +621,8 @@ impl Printer for InteractivePrinter<'_> {
     }
 
     fn print_snip(&mut self, handle: &mut OutputHandle) -> Result<()> {
+        self.flush_markdown_tables(handle)?;
+
         let panel = self.create_fake_panel(" ...");
         let panel_count = panel.chars().count();
 
@@ -698,7 +711,71 @@ impl Printer for InteractivePrinter<'_> {
             line
         };
 
-        let regions = self.highlight_regions_for_line(&line)?;
+        // A Markdown table can only be laid out once all of its lines are
+        // known, so the printing of those lines is delayed.
+        if self.markdown_tables.is_some() {
+            let ready = self
+                .markdown_tables
+                .as_mut()
+                .expect("checked above")
+                .feed(PendingLine {
+                    out_of_range,
+                    line_number,
+                    max_buffered_line_number,
+                    line: line.into_owned(),
+                });
+            return self.print_pending_lines(handle, ready);
+        }
+
+        self.print_line_impl(
+            out_of_range,
+            handle,
+            line_number,
+            &line,
+            max_buffered_line_number,
+        )
+    }
+}
+
+impl InteractivePrinter<'_> {
+    /// Prints the lines of a table that is still being buffered, as-is.
+    fn flush_markdown_tables(&mut self, handle: &mut OutputHandle) -> Result<()> {
+        match self.markdown_tables {
+            Some(ref mut tables) => {
+                let pending = tables.flush();
+                self.print_pending_lines(handle, pending)
+            }
+            None => Ok(()),
+        }
+    }
+
+    fn print_pending_lines(
+        &mut self,
+        handle: &mut OutputHandle,
+        lines: Vec<PendingLine>,
+    ) -> Result<()> {
+        for pending in lines {
+            self.print_line_impl(
+                pending.out_of_range,
+                handle,
+                pending.line_number,
+                &pending.line,
+                pending.max_buffered_line_number,
+            )?;
+        }
+
+        Ok(())
+    }
+
+    fn print_line_impl(
+        &mut self,
+        out_of_range: bool,
+        handle: &mut OutputHandle,
+        line_number: usize,
+        line: &str,
+        max_buffered_line_number: MaxBufferedLineNumber,
+    ) -> Result<()> {
+        let regions = self.highlight_regions_for_line(line)?;
         if out_of_range {
             return Ok(());
         }
