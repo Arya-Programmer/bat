@@ -353,7 +353,9 @@ impl<'a> InteractivePrinter<'a> {
             strip_ansi,
             sanitize,
             strip_overstrike,
-            markdown_tables: (is_markdown && !config.show_nonprintable)
+            // Laying out a table means holding its lines back, which is at odds
+            // with streaming input line by line.
+            markdown_tables: (is_markdown && !config.show_nonprintable && !config.unbuffered)
                 .then(TableRenderer::default),
         })
     }
@@ -713,17 +715,14 @@ impl Printer for InteractivePrinter<'_> {
 
         // A Markdown table can only be laid out once all of its lines are
         // known, so the printing of those lines is delayed.
-        if self.markdown_tables.is_some() {
-            let ready = self
-                .markdown_tables
-                .as_mut()
-                .expect("checked above")
-                .feed(PendingLine {
-                    out_of_range,
-                    line_number,
-                    max_buffered_line_number,
-                    line: line.into_owned(),
-                });
+        if let Some(tables) = self.markdown_tables.as_mut() {
+            let ready = tables.feed(PendingLine {
+                out_of_range,
+                line_number,
+                max_buffered_line_number,
+                continuation: false,
+                line: line.into_owned(),
+            });
             return self.print_pending_lines(handle, ready);
         }
 
@@ -733,6 +732,7 @@ impl Printer for InteractivePrinter<'_> {
             line_number,
             &line,
             max_buffered_line_number,
+            false,
         )
     }
 }
@@ -761,6 +761,7 @@ impl InteractivePrinter<'_> {
                 pending.line_number,
                 &pending.line,
                 pending.max_buffered_line_number,
+                pending.continuation,
             )?;
         }
 
@@ -774,6 +775,9 @@ impl InteractivePrinter<'_> {
         line_number: usize,
         line: &str,
         max_buffered_line_number: MaxBufferedLineNumber,
+        // Set for a line that is drawn in addition to the lines of the file,
+        // and that therefore gets an empty gutter instead of a line number.
+        continuation: bool,
     ) -> Result<()> {
         let regions = self.highlight_regions_for_line(line)?;
         if out_of_range {
@@ -825,7 +829,7 @@ impl InteractivePrinter<'_> {
             let decorations = self
                 .decorations
                 .iter()
-                .map(|d| d.generate(display_line_number, false, self));
+                .map(|d| d.generate(display_line_number, continuation, self));
 
             for deco in decorations {
                 write!(handle, "{} ", deco.text)?;

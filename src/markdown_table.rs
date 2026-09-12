@@ -3,18 +3,24 @@
 //! Markdown tables are only readable when their columns line up, which is
 //! rarely true in the source file. [`TableRenderer`] buffers the lines of a
 //! table until it has seen all of them, then rewrites every cell so that the
-//! columns share a common width and the separators become box-drawing
-//! characters:
+//! columns share a common width, and draws a full border around the result:
 //!
 //! ```text
-//! | Name | Age |        │ Name  │ Age │
-//! |------|----:|   ->   ├───────┼─────┤
-//! | Alice | 30 |        │ Alice │  30 │
+//!                        ┌───────┬─────┐
+//! | Name | Age |         │ Name  │ Age │
+//! |------|----:|   ->    ╞═══════╪═════╡
+//! | Alice | 30 |         │ Alice │  30 │
+//!                        └───────┴─────┘
 //! ```
 //!
-//! The rewrite happens before syntax highlighting and always produces exactly
-//! one output line per input line, so line numbers and every other decoration
-//! keep working as usual.
+//! The border follows the shape that terminal table renderers have settled on
+//! (`comfy-table`'s `UTF8_FULL`, `rich`'s `SQUARE`): light box-drawing lines
+//! all around, with a heavier rule below the header row.
+//!
+//! The rewrite happens before syntax highlighting. The two border lines are the
+//! only lines that do not exist in the file, and they are printed the way a
+//! wrapped line is - as a continuation, with an empty gutter - so that they
+//! claim no line number of their own.
 
 use unicode_width::UnicodeWidthStr;
 
@@ -25,6 +31,9 @@ pub(crate) struct PendingLine {
     pub out_of_range: bool,
     pub line_number: usize,
     pub max_buffered_line_number: MaxBufferedLineNumber,
+    /// Set for the border lines, which are drawn in addition to the lines of
+    /// the file and therefore carry no line number of their own.
+    pub continuation: bool,
     pub line: String,
 }
 
@@ -63,6 +72,14 @@ impl TableRenderer {
 
     fn feed_into(&mut self, line: PendingLine, ready: &mut Vec<PendingLine>) {
         let content = content_of(&line.line);
+
+        // Four spaces of indentation start a code block, whose contents are
+        // shown verbatim.
+        if !self.in_table && content.starts_with("    ") {
+            ready.extend(self.flush());
+            ready.push(line);
+            return;
+        }
 
         if is_code_fence(content) {
             self.in_code_fence = !self.in_code_fence;
@@ -114,6 +131,11 @@ fn cell_count(line: &PendingLine) -> usize {
 /// Strips the line terminator, which is re-attached after rendering.
 fn content_of(line: &str) -> &str {
     line.trim_end_matches(['\r', '\n'])
+}
+
+/// The line terminator of `line`, which is empty for an unterminated last line.
+fn ending_of(line: &str) -> &str {
+    &line[content_of(line).len()..]
 }
 
 fn is_code_fence(content: &str) -> bool {
@@ -174,8 +196,8 @@ fn delimiter_row(content: &str) -> Option<Vec<Alignment>> {
         .collect()
 }
 
-/// Rewrites the buffered lines of a table. Anything that turned out not to be a
-/// table is returned unchanged.
+/// Rewrites the buffered lines of a table and surrounds them with a border.
+/// Anything that turned out not to be a table is returned unchanged.
 fn render(mut pending: Vec<PendingLine>) -> Vec<PendingLine> {
     let Some(alignments) = pending
         .get(1)
@@ -209,12 +231,31 @@ fn render(mut pending: Vec<PendingLine>) -> Vec<PendingLine> {
         .chars()
         .take_while(|c| c.is_whitespace())
         .collect();
+    let rule = |line: char, left: char, joint: char, right: char| {
+        let columns: Vec<String> = widths
+            .iter()
+            .map(|width| line.to_string().repeat(width + 2))
+            .collect();
+        format!("{indent}{left}{}{right}", columns.join(&joint.to_string()))
+    };
+
+    // The last line of the file may not be terminated, in which case it is the
+    // bottom border that has to stay unterminated.
+    let last_ending = ending_of(&pending[pending.len() - 1].line).to_string();
+    let inner_ending = if last_ending.is_empty() {
+        "\n"
+    } else {
+        &last_ending
+    };
 
     for (index, (line, cells)) in pending.iter_mut().zip(&rows).enumerate() {
-        let ending = &line.line[content_of(&line.line).len()..];
+        let ending = if index == rows.len() - 1 {
+            inner_ending
+        } else {
+            ending_of(&line.line)
+        };
         let rendered = if index == 1 {
-            let columns: Vec<String> = widths.iter().map(|width| "─".repeat(width + 2)).collect();
-            format!("{indent}├{}┤", columns.join("┼"))
+            rule('═', '╞', '╪', '╡')
         } else {
             let columns: Vec<String> = widths
                 .iter()
@@ -230,7 +271,29 @@ fn render(mut pending: Vec<PendingLine>) -> Vec<PendingLine> {
         line.line = format!("{rendered}{ending}");
     }
 
+    // A border line is attached to the row it touches, so that it is skipped
+    // and highlighted along with that row.
+    let top = border(&pending[0], rule('─', '┌', '┬', '┐'), inner_ending);
+    let bottom = border(
+        &pending[pending.len() - 1],
+        rule('─', '└', '┴', '┘'),
+        &last_ending,
+    );
+
+    pending.insert(0, top);
+    pending.push(bottom);
     pending
+}
+
+/// Builds one of the two border lines that are drawn around a table.
+fn border(neighbour: &PendingLine, rendered: String, ending: &str) -> PendingLine {
+    PendingLine {
+        out_of_range: neighbour.out_of_range,
+        line_number: neighbour.line_number,
+        max_buffered_line_number: neighbour.max_buffered_line_number,
+        continuation: true,
+        line: format!("{rendered}{ending}"),
+    }
 }
 
 fn pad(cell: &str, width: usize, alignment: Alignment) -> String {
@@ -258,6 +321,7 @@ mod tests {
                 out_of_range: false,
                 line_number: index + 1,
                 max_buffered_line_number: MaxBufferedLineNumber::Final(index + 1),
+                continuation: false,
                 line: format!("{line}\n"),
             }));
         }
@@ -269,7 +333,13 @@ mod tests {
     fn renders_a_table() {
         assert_eq!(
             render_all("| Name | Age |\n|---|---|\n| Alice | 30 |\n"),
-            "│ Name  │ Age │\n├───────┼─────┤\n│ Alice │ 30  │\n"
+            concat!(
+                "┌───────┬─────┐\n",
+                "│ Name  │ Age │\n",
+                "╞═══════╪═════╡\n",
+                "│ Alice │ 30  │\n",
+                "└───────┴─────┘\n",
+            )
         );
     }
 
@@ -277,7 +347,13 @@ mod tests {
     fn renders_a_table_without_outer_pipes() {
         assert_eq!(
             render_all("Name | Age\n--- | ---\nAlice | 30\n"),
-            "│ Name  │ Age │\n├───────┼─────┤\n│ Alice │ 30  │\n"
+            concat!(
+                "┌───────┬─────┐\n",
+                "│ Name  │ Age │\n",
+                "╞═══════╪═════╡\n",
+                "│ Alice │ 30  │\n",
+                "└───────┴─────┘\n",
+            )
         );
     }
 
@@ -285,7 +361,13 @@ mod tests {
     fn respects_alignment() {
         assert_eq!(
             render_all("| a | b | c |\n|:---|:---:|---:|\n| 1 | 2 | 3 |\n"),
-            "│ a   │  b  │   c │\n├─────┼─────┼─────┤\n│ 1   │  2  │   3 │\n"
+            concat!(
+                "┌─────┬─────┬─────┐\n",
+                "│ a   │  b  │   c │\n",
+                "╞═════╪═════╪═════╡\n",
+                "│ 1   │  2  │   3 │\n",
+                "└─────┴─────┴─────┘\n",
+            )
         );
     }
 
@@ -293,7 +375,13 @@ mod tests {
     fn keeps_track_of_wide_characters() {
         assert_eq!(
             render_all("| a | b |\n|---|---|\n| 日本 | x |\n"),
-            "│ a    │ b   │\n├──────┼─────┤\n│ 日本 │ x   │\n"
+            concat!(
+                "┌──────┬─────┐\n",
+                "│ a    │ b   │\n",
+                "╞══════╪═════╡\n",
+                "│ 日本 │ x   │\n",
+                "└──────┴─────┘\n",
+            )
         );
     }
 
@@ -306,21 +394,41 @@ mod tests {
                 out_of_range: index == 0,
                 line_number: index + 10,
                 max_buffered_line_number: MaxBufferedLineNumber::Final(12),
+                continuation: false,
                 line: line.to_string(),
             }));
         }
         output.extend(renderer.flush());
 
-        assert_eq!(output.len(), 3);
+        // The two border lines are attached to the rows they touch.
+        assert_eq!(output.len(), 5);
+        assert!(output[0].continuation);
         assert!(output[0].out_of_range);
         assert_eq!(output[0].line_number, 10);
-        assert_eq!(output[2].line_number, 12);
+        assert!(!output[1].continuation);
+        assert_eq!(output[1].line_number, 10);
+        assert_eq!(output[3].line_number, 12);
+        assert!(output[4].continuation);
+        assert_eq!(output[4].line_number, 12);
         assert!(output.iter().all(|line| line.line.ends_with("\r\n")));
     }
 
     #[test]
     fn leaves_everything_else_alone() {
-        let text = "# Title\n\na | b without a delimiter row\nsome | text\n\n```\n| a | b |\n|---|---|\n```\n";
+        let text = concat!(
+            "# Title\n",
+            "\n",
+            "a | b without a delimiter row\n",
+            "some | text\n",
+            "\n",
+            "```\n",
+            "| a | b |\n",
+            "|---|---|\n",
+            "```\n",
+            "\n",
+            "    | a | b |\n",
+            "    |---|---|\n",
+        );
         assert_eq!(render_all(text), text);
     }
 
@@ -328,7 +436,14 @@ mod tests {
     fn handles_ragged_rows_and_escaped_pipes() {
         assert_eq!(
             render_all("| a | b |\n|---|---|\n| 1 |\n| x \\| y | 2 |\n"),
-            "│ a     │ b   │\n├───────┼─────┤\n│ 1     │     │\n│ x | y │ 2   │\n"
+            concat!(
+                "┌───────┬─────┐\n",
+                "│ a     │ b   │\n",
+                "╞═══════╪═════╡\n",
+                "│ 1     │     │\n",
+                "│ x | y │ 2   │\n",
+                "└───────┴─────┘\n",
+            )
         );
     }
 }

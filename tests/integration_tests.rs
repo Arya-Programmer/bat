@@ -25,6 +25,7 @@ mod unix {
 use unix::*;
 
 mod utils;
+use utils::ansi::strip_escapes;
 use utils::command::{bat, bat_with_config};
 
 #[cfg(unix)]
@@ -2669,27 +2670,6 @@ fn file_with_invalid_utf8_filename() {
         .stdout("dummy content\n");
 }
 
-/// Removes the ANSI escape sequences that `--color=always` adds, so that tests
-/// can assert on the text that ends up on screen.
-fn strip_ansi_escapes(input: &str) -> String {
-    let mut output = String::with_capacity(input.len());
-    let mut chars = input.chars();
-    while let Some(c) = chars.next() {
-        if c != '\x1b' {
-            output.push(c);
-            continue;
-        }
-        if chars.next() == Some('[') {
-            for c in chars.by_ref() {
-                if c.is_ascii_alphabetic() {
-                    break;
-                }
-            }
-        }
-    }
-    output
-}
-
 #[test]
 fn markdown_tables_are_aligned() {
     let output = bat()
@@ -2704,14 +2684,16 @@ fn markdown_tables_are_aligned() {
         .clone();
 
     assert_eq!(
-        strip_ansi_escapes(from_utf8(&output).expect("valid utf8")),
+        strip_escapes(from_utf8(&output).expect("valid utf8")),
         concat!(
             "   1 Before the table.\n",
             "   2 \n",
+            "     ┌─────────┬───────┬───────┐\n",
             "   3 │ Fruit   │ Price │ Stock │\n",
-            "   4 ├─────────┼───────┼───────┤\n",
+            "   4 ╞═════════╪═══════╪═══════╡\n",
             "   5 │ Apples  │  1.20 │  yes  │\n",
             "   6 │ Bananas │ 12.00 │  no   │\n",
+            "     └─────────┴───────┴───────┘\n",
             "   7 \n",
             "   8 After the table.\n",
         )
